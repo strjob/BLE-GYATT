@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Unlicense OR CC0-1.0
  *
  * Обработчик Subas протокола.
- * Формат сообщения: #TO/FROM/OP/DATA$
+ * Формат сообщения: #TO/FROM/OP/DATA$ или #TO/FROM/OP$
  *
  * Поддерживаемые операции:
  *   PING      -> ответ PONG
@@ -23,9 +23,9 @@
 #define SENSOR_TYPE "mock_ble"
 
 /*
- * Парсинг Subas сообщения: #TO/FROM/OP/DATA$
- * Разделяем по первым трём слешам.
- * DATA — всё после третьего слеша до $.
+ * Парсинг Subas сообщения: #TO/FROM/OP/DATA$ или #TO/FROM/OP$
+ * Минимум 2 слеша (TO, FROM, OP обязательны), третий опционален.
+ * DATA — всё после третьего слеша до $, пустая строка если слеша нет.
  */
 static bool parse_subas(const char *msg, uint16_t len,
                         char *to, char *from, char *op, char *data) {
@@ -52,7 +52,8 @@ static bool parse_subas(const char *msg, uint16_t len,
         }
     }
 
-    if (slash_count < 3) {
+    /* Минимум 2 слеша (TO/FROM/OP), третий опционален (DATA) */
+    if (slash_count < 2) {
         return false;
     }
 
@@ -72,21 +73,33 @@ static bool parse_subas(const char *msg, uint16_t len,
     memcpy(from, slashes[0] + 1, flen);
     from[flen] = '\0';
 
-    /* OP: slashes[1]+1..slashes[2] */
-    flen = (size_t)(slashes[2] - slashes[1] - 1);
-    if (flen >= FIELD_MAX_LEN) {
-        return false;
-    }
-    memcpy(op, slashes[1] + 1, flen);
-    op[flen] = '\0';
+    if (slash_count == 3) {
+        /* OP: slashes[1]+1..slashes[2] */
+        flen = (size_t)(slashes[2] - slashes[1] - 1);
+        if (flen >= FIELD_MAX_LEN) {
+            return false;
+        }
+        memcpy(op, slashes[1] + 1, flen);
+        op[flen] = '\0';
 
-    /* DATA: slashes[2]+1..end (может быть пустым) */
-    flen = (size_t)(end - slashes[2] - 1);
-    if (flen >= DATA_MAX_LEN) {
-        flen = DATA_MAX_LEN - 1;
+        /* DATA: slashes[2]+1..end (может быть пустым) */
+        flen = (size_t)(end - slashes[2] - 1);
+        if (flen >= DATA_MAX_LEN) {
+            flen = DATA_MAX_LEN - 1;
+        }
+        memcpy(data, slashes[2] + 1, flen);
+        data[flen] = '\0';
+    } else {
+        /* Нет третьего слеша: OP — всё от slashes[1]+1 до $, DATA пустой */
+        flen = (size_t)(end - slashes[1] - 1);
+        if (flen >= FIELD_MAX_LEN) {
+            return false;
+        }
+        memcpy(op, slashes[1] + 1, flen);
+        op[flen] = '\0';
+
+        data[0] = '\0';
     }
-    memcpy(data, slashes[2] + 1, flen);
-    data[flen] = '\0';
 
     return true;
 }
