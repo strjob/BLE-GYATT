@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 SOVA BLE Sensor — тестовая прошивка для ESP32-C6. Реализует BLE GATT сервер с кастомным SOVA Service для тестирования BLE-транспорта в sova-tauri.
 
-Протокол: Subas (`#TO/FROM/OP/DATA$`) поверх BLE характеристик TX (Write) и RX (Notify).
+Протокол: Subas (`#TO/FROM/OP/DATA$` или `#TO/FROM/OP$`) поверх BLE характеристик TX (Write) и RX (Notify).
 
 Targets: ESP32, ESP32-C2, ESP32-C3, ESP32-C5, ESP32-C6, ESP32-C61, ESP32-H2, ESP32-S3.
 
@@ -45,17 +45,19 @@ Entry point is `app_main()` in `main/main.c`. Initialization order:
 
 ### Data Flow
 
-1. App writes Subas command to TX characteristic: `#SENSOR/APP/PING/$`
+1. App writes Subas command to TX characteristic: `#SENSOR/APP/PING$`
 2. `tx_chr_access()` callback fires -> `subas_handle_message()` parses and generates response
-3. Response sent via `gatt_svc_notify()` on RX characteristic: `#APP/SENSOR/PONG/$`
+3. Response sent via `gatt_svc_notify()` on RX characteristic: `#APP/SENSOR/PONG$`
 
 ### Subas Operations
 
 | Command | Response | Description |
 |---------|----------|-------------|
-| `#SENSOR/APP/PING/$` | `#APP/SENSOR/PONG/$` | Connectivity test |
-| `#SENSOR/APP/GET_INFO/$` | `#APP/SENSOR/INFO/{...}$` | Device info (fw, type, battery) |
-| `#SENSOR/APP/*/DATA$` | `#APP/SENSOR/*/DATA$` | Echo (swap TO/FROM) |
+| `#SENSOR/APP/PING$` | `#APP/SENSOR/PONG$` | Connectivity test |
+| `#SENSOR/APP/GET_INFO$` | `#APP/SENSOR/INFO/{...}$` | Device info (fw, type, battery) |
+| `#SENSOR/APP/R$` | `#APP/SENSOR/AR/mock_ble,25.3$` | Read (тестовые данные) |
+| `#SENSOR/APP/W/DATA$` | `#APP/SENSOR/AW/DATA$` | Write (подтверждение) |
+| `#SENSOR/APP/*/DATA$` | `#APP/SENSOR/A/DATA$` | Echo (swap TO/FROM) |
 
 ### LED Indication
 

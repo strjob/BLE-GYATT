@@ -117,14 +117,15 @@ uint16_t subas_handle_message(const uint8_t *input, uint16_t input_len,
         return 0;
     }
 
-    ESP_LOGI(TAG, "RX: #%s/%s/%s/%s$", to, from, op, data);
+    ESP_LOGI(TAG, data[0] ? "RX: #%s/%s/%s/%s$" : "RX: #%s/%s/%s$",
+             to, from, op, data);
 
     int written = 0;
 
     /* Ответ на PING */
     if (strcmp(op, "PING") == 0) {
         written = snprintf((char *)output, output_max_len,
-                           "#%s/%s/PONG/$", from, to);
+                           "#%s/%s/PONG$", from, to);
     }
     /* Ответ на GET_INFO — информация об устройстве */
     else if (strcmp(op, "GET_INFO") == 0) {
@@ -142,8 +143,8 @@ uint16_t subas_handle_message(const uint8_t *input, uint16_t input_len,
     /* W (write) — ответ AW (подтверждение записи) */
     else if (strcmp(op, "W") == 0) {
         written = snprintf((char *)output, output_max_len,
-                           "#%s/%s/AW/%s$", from, to,
-                           data[0] ? data : "");
+                           data[0] ? "#%s/%s/AW/%s$" : "#%s/%s/AW$",
+                           from, to, data);
     }
     /* Всё остальное — ответ A с echo DATA */
     else {
