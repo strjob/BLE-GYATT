@@ -77,5 +77,8 @@ Desktop.ini
 *.suo       # Visual Studio Solution User Options
 *.sln.docstates # Visual Studio
 
+# IDE
+.vscode/
+
 # Claude Code
 .claude/
