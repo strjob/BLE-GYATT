@@ -123,8 +123,11 @@ uint16_t subas_handle_message(const uint8_t *input, uint16_t input_len,
         return 0;
     }
 
-    ESP_LOGI(TAG, data[0] ? "RX: #%s/%s/%s/%s$" : "RX: #%s/%s/%s$",
-             to, from, op, data);
+    if (data[0]) {
+        ESP_LOGI(TAG, "RX: #%s/%s/%s/%s$", to, from, op, data);
+    } else {
+        ESP_LOGI(TAG, "RX: #%s/%s/%s$", to, from, op);
+    }
 
     int written = 0;
 
