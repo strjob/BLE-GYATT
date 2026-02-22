@@ -12,7 +12,7 @@
  *   W/ON      -> AM/ON (старт подписки)
  *   W/OFF     -> AM/OFF (стоп подписки)
  *   W/Time=N  -> AM/Time=N (интервал) или EW (ошибка)
- *   W/*       -> AW (acknowledge write)
+ *   W/other   -> AW (acknowledge write)
  *   *         -> A с echo DATA (acknowledge)
  */
 #include "subas_handler.h"
