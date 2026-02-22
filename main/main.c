@@ -21,6 +21,8 @@
 #include "gap.h"
 #include "gatt_svc.h"
 #include "led.h"
+#include "sensor.h"
+#include "sensor_task.h"
 
 /* Прототипы */
 void ble_store_config_init(void);
@@ -104,6 +106,13 @@ void app_main(void) {
         return;
     }
 
+    /* Инициализация датчика */
+    ret = sensor_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Sensor init failed: %d", ret);
+        return;
+    }
+
     /* Инициализация NimBLE стека */
     ret = nimble_port_init();
     if (ret != ESP_OK) {
@@ -133,6 +142,9 @@ void app_main(void) {
     /* Запуск задач */
     xTaskCreate(nimble_host_task, "NimBLE Host", 4 * 1024, NULL, 5, NULL);
     xTaskCreate(status_led_task, "Status LED", 2 * 1024, NULL, 3, NULL);
+
+    /* Задача периодической отправки данных датчика */
+    sensor_task_init();
 
     ESP_LOGI(TAG, "SOVA BLE Sensor initialized");
 }

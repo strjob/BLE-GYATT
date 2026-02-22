@@ -40,3 +40,33 @@ menu "Example Configuration"
             Some GPIOs are used for other purposes (flash connections, etc.) and cannot be used to blink.
 
 endmenu
+
+menu "Sensor Configuration"
+
+    choice SENSOR_TYPE
+        prompt "Sensor type"
+        default SENSOR_TYPE_MOCK
+        help
+            Select the sensor type. Mock generates simulated temperature and humidity data.
+
+        config SENSOR_TYPE_MOCK
+            bool "Mock (simulated T+H)"
+    endchoice
+
+    config SUBAS_DEVICE_NAME
+        string "Subas device name (protocol address)"
+        default "MOCK_TH" if SENSOR_TYPE_MOCK
+        help
+            Device name used as TO/FROM address in Subas protocol.
+            The app routes commands by this name.
+            Examples: MOCK_TH, DHT22, SCD30, STEMP, SHUM.
+
+    config SENSOR_DEFAULT_INTERVAL_MS
+        int "Default polling interval (ms)"
+        default 1000
+        range 100 60000
+        help
+            Default interval for periodic sensor data notifications (in milliseconds).
+            Minimum 100ms, maximum 60000ms.
+
+endmenu

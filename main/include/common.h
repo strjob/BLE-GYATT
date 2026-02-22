@@ -33,6 +33,9 @@
 /* Логирование */
 #define TAG "SOVA_BLE"
 
+/* Имя устройства в Subas-протоколе (адресация команд, из Kconfig) */
+#define SUBAS_DEVICE_NAME CONFIG_SUBAS_DEVICE_NAME
+
 /* Имя устройства — перезаписывается в runtime как "SOVA-XXXX" */
 #define DEVICE_NAME_DEFAULT "SOVA-????"
 #define DEVICE_NAME_MAX_LEN 16

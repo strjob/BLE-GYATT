@@ -88,3 +88,10 @@ UUID в прошивке совпадают с `config/config.json` в sova-taur
 - Headers in `main/include/`, sources in `main/src/`, entry point at `main/main.c`
 - Comments in Russian
 - License: Unlicense OR CC0-1.0
+
+## Git Commit Preferences
+
+- **Language**: All commit messages must be written in Russian
+- **NEVER** include "Co-Authored-By: Claude <noreply@anthropic.com>" in commit messages
+- **NEVER** include the "🤖 Generated with Claude Code" line in commit messages
+- Keep commit messages clean and professional without AI attribution

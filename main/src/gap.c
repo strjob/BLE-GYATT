@@ -10,6 +10,7 @@
 #include "gap.h"
 #include "common.h"
 #include "gatt_svc.h"
+#include "sensor_task.h"
 
 /* Прототипы приватных функций */
 inline static void format_addr(char *addr_str, uint8_t addr[]);
@@ -169,6 +170,7 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg) {
     case BLE_GAP_EVENT_DISCONNECT:
         ESP_LOGI(TAG, "disconnected; reason=%d", event->disconnect.reason);
         peer_connected = false;
+        sensor_task_subscribe(false);
         start_advertising();
         return rc;
 
