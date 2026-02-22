@@ -41,6 +41,25 @@ menu "Example Configuration"
 
 endmenu
 
+menu "Power Management"
+    config SOVA_PM_ENABLE
+        bool "Enable automatic light sleep"
+        default y
+        depends on PM_ENABLE && FREERTOS_USE_TICKLESS_IDLE
+        help
+            Enable automatic light sleep between BLE events.
+
+    config SOVA_PM_MAX_CPU_FREQ_MHZ
+        int "Maximum CPU frequency (MHz)"
+        default 160
+        depends on SOVA_PM_ENABLE
+
+    config SOVA_PM_MIN_CPU_FREQ_MHZ
+        int "Minimum CPU frequency (MHz)"
+        default 10
+        depends on SOVA_PM_ENABLE
+endmenu
+
 menu "Sensor Configuration"
 
     choice SENSOR_TYPE

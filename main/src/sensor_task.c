@@ -19,7 +19,7 @@
 
 #define SUBSCRIBER_MAX_LEN 64
 #define MIN_INTERVAL_MS    100
-#define IDLE_DELAY_MS      1000
+#define IDLE_DELAY_MS      5000
 
 /* Состояние подписки */
 static volatile bool s_subscribed = false;

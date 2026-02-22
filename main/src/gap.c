@@ -152,8 +152,8 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg) {
             struct ble_gap_upd_params params = {
                 .itvl_min = BLE_GAP_INITIAL_CONN_ITVL_MIN, /* ~30ms */
                 .itvl_max = 40,                             /* 50ms */
-                .latency = 0,
-                .supervision_timeout = 400, /* 4000ms */
+                .latency = 4,              /* Пропуск до 4 connection events — экономия radio ~75% */
+                .supervision_timeout = 400, /* 4000ms > (1+4)*50ms*2 = 500ms */
             };
             rc = ble_gap_update_params(event->connect.conn_handle, &params);
             if (rc != 0) {

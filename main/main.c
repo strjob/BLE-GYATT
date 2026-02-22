@@ -18,6 +18,7 @@
  *   Горит   — подключён клиент
  */
 #include "common.h"
+#include "esp_pm.h"
 #include "gap.h"
 #include "gatt_svc.h"
 #include "led.h"
@@ -26,11 +27,33 @@
 
 /* Прототипы */
 void ble_store_config_init(void);
+static esp_err_t power_management_init(void);
 static void on_stack_reset(int reason);
 static void on_stack_sync(void);
 static void nimble_host_config_init(void);
 static void nimble_host_task(void *param);
 static void status_led_task(void *param);
+
+/* Инициализация power management: light sleep между BLE событиями */
+static esp_err_t power_management_init(void) {
+#if CONFIG_SOVA_PM_ENABLE
+    esp_pm_config_t pm_config = {
+        .max_freq_mhz = CONFIG_SOVA_PM_MAX_CPU_FREQ_MHZ,
+        .min_freq_mhz = CONFIG_SOVA_PM_MIN_CPU_FREQ_MHZ,
+        .light_sleep_enable = true,
+    };
+    esp_err_t ret = esp_pm_configure(&pm_config);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "PM configure failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    ESP_LOGI(TAG, "Power management: light sleep (max=%dMHz, min=%dMHz)",
+             CONFIG_SOVA_PM_MAX_CPU_FREQ_MHZ, CONFIG_SOVA_PM_MIN_CPU_FREQ_MHZ);
+#else
+    ESP_LOGI(TAG, "Power management: disabled");
+#endif
+    return ESP_OK;
+}
 
 /* Callback: хост сбросил BLE стек */
 static void on_stack_reset(int reason) {
@@ -70,12 +93,18 @@ static void nimble_host_task(void *param) {
 static void status_led_task(void *param) {
     ESP_LOGI(TAG, "status LED task started");
 
+    bool was_connected = false;
+
     while (1) {
         if (gap_is_connected()) {
-            /* Подключён — LED горит постоянно */
-            led_on();
-            vTaskDelay(pdMS_TO_TICKS(500));
+            /* Подключён — LED горит постоянно, спим подольше для экономии */
+            if (!was_connected) {
+                led_on();
+                was_connected = true;
+            }
+            vTaskDelay(pdMS_TO_TICKS(5000));
         } else {
+            was_connected = false;
             /* Advertising — LED мигает */
             led_on();
             vTaskDelay(pdMS_TO_TICKS(200));
@@ -104,6 +133,12 @@ void app_main(void) {
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "NVS init failed: %d", ret);
         return;
+    }
+
+    /* Power management — до NimBLE, чтобы BLE контроллер интегрировался с PM */
+    ret = power_management_init();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "PM init failed, продолжаем без энергосбережения");
     }
 
     /* Инициализация датчика */
