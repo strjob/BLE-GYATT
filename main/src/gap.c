@@ -4,8 +4,8 @@
  *
  * GAP — advertising с SOVA Service UUID, управление соединениями.
  *
- * Advertisement data:  Flags + 128-bit Service UUID
- * Scan response data:  Complete Local Name ("SOVA-XXXX")
+ * Advertisement data:  Flags + 128-bit Service UUID + Shortened Local Name ("SOVA")
+ * Scan response data:  Complete Local Name ("SOVA-XXXX") + TX Power
  */
 #include "gap.h"
 #include "common.h"
@@ -21,7 +21,7 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg);
 /* Приватные переменные */
 static uint8_t own_addr_type;
 static uint8_t addr_val[6] = {0};
-static char device_name[DEVICE_NAME_MAX_LEN] = DEVICE_NAME_DEFAULT;
+static char device_name[DEVICE_NAME_MAX_LEN] = DEVICE_NAME_SHORT;
 static volatile bool peer_connected = false;
 
 /* UUID сервиса для включения в advertisement */
@@ -57,11 +57,13 @@ static void print_conn_desc(struct ble_gap_conn_desc *desc) {
  * Настройка и запуск advertising.
  *
  * Advertisement packet:
- *   - Flags: General Discoverable + BR/EDR Not Supported
- *   - 128-bit Service UUID (SOVA_SERVICE_UUID)
+ *   - Flags: General Discoverable + BR/EDR Not Supported  (3 байта)
+ *   - 128-bit Service UUID (SOVA_SERVICE_UUID)             (18 байт)
+ *   - Shortened Local Name ("SOVA")                        (6 байт)
+ *   Итого: 27 из 31 байта
  *
  * Scan response packet:
- *   - Complete Local Name ("SOVA-XXXX")
+ *   - Complete Local Name ("SOVA-XXXX") + TX Power
  *
  * Интервал: 100ms (быстро для тестирования)
  */
@@ -80,6 +82,11 @@ static void start_advertising(void) {
     adv_fields.uuids128 = &adv_svc_uuid;
     adv_fields.num_uuids128 = 1;
     adv_fields.uuids128_is_complete = 1;
+
+    /* Shortened Local Name — "SOVA" (4 байта), доступно сканеру без Scan Response */
+    adv_fields.name = (uint8_t *)DEVICE_NAME_SHORT;
+    adv_fields.name_len = strlen(DEVICE_NAME_SHORT);
+    adv_fields.name_is_complete = 0; /* 0 = Shortened Local Name */
 
     rc = ble_gap_adv_set_fields(&adv_fields);
     if (rc != 0) {
@@ -256,11 +263,15 @@ void adv_init(void) {
     format_addr(addr_str, addr_val);
     ESP_LOGI(TAG, "BLE address: %s", addr_str);
 
-    /* Сформировать имя "SOVA-XXXX" из последних 2 байт MAC */
+    /*
+     * Полное имя "SOVA-XXXX" для Scan Response и GAP Device Name.
+     * В ADV пакете передаётся только Shortened Name "SOVA" (экономия места),
+     * а полное имя доступно через Scan Response или после подключения.
+     */
     snprintf(device_name, sizeof(device_name), "SOVA-%02X%02X",
              addr_val[1], addr_val[0]);
     ble_svc_gap_device_name_set(device_name);
-    ESP_LOGI(TAG, "device name: %s", device_name);
+    ESP_LOGI(TAG, "device name: %s (ADV short: %s)", device_name, DEVICE_NAME_SHORT);
 
     /* Запустить advertising */
     start_advertising();
@@ -272,8 +283,8 @@ int gap_init(void) {
 
     ble_svc_gap_init();
 
-    /* Временное имя — будет перезаписано в adv_init() */
-    rc = ble_svc_gap_device_name_set(DEVICE_NAME_DEFAULT);
+    /* Временное короткое имя — полное ("SOVA-XXXX") устанавливается в adv_init() */
+    rc = ble_svc_gap_device_name_set(DEVICE_NAME_SHORT);
     if (rc != 0) {
         ESP_LOGE(TAG, "set device name failed: %d", rc);
         return rc;

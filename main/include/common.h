@@ -36,8 +36,8 @@
 /* Имя устройства в Subas-протоколе (адресация команд, из Kconfig) */
 #define SUBAS_DEVICE_NAME CONFIG_SUBAS_DEVICE_NAME
 
-/* Имя устройства — перезаписывается в runtime как "SOVA-XXXX" */
-#define DEVICE_NAME_DEFAULT "SOVA-????"
+/* Короткое имя устройства для BLE advertisement (4 символа, влезает в ADV рядом с UUID128) */
+#define DEVICE_NAME_SHORT "SOVA"
 #define DEVICE_NAME_MAX_LEN 16
 
 /*
