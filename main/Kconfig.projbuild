@@ -70,11 +70,22 @@ menu "Sensor Configuration"
 
         config SENSOR_TYPE_MOCK
             bool "Mock (simulated T+H)"
+        config SENSOR_TYPE_DHT22
+            bool "DHT22 / AM2302 (RMT backend)"
     endchoice
+
+    config SENSOR_DHT22_GPIO
+        int "DHT22 data GPIO number"
+        default 10
+        depends on SENSOR_TYPE_DHT22
+        help
+            GPIO pin connected to the DHT22 data line.
+            Requires external pull-up resistor (4.7k to 3.3V).
 
     config SUBAS_DEVICE_NAME
         string "Subas device name (protocol address)"
         default "MOCK_TH" if SENSOR_TYPE_MOCK
+        default "DHT22" if SENSOR_TYPE_DHT22
         help
             Device name used as TO/FROM address in Subas protocol.
             The app routes commands by this name.
