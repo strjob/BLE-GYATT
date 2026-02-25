@@ -23,7 +23,7 @@ static uint8_t own_addr_type;
 static uint8_t addr_val[6] = {0};
 static char device_name[DEVICE_NAME_MAX_LEN] = DEVICE_NAME_SHORT;
 static char own_mac[18] = {0}; /* "aa:bb:cc:dd:ee:ff\0" — адрес в Subas протоколе */
-static volatile bool peer_connected = false;
+static volatile int peer_count = 0;  /* Количество подключённых клиентов */
 
 /* UUID сервиса для включения в advertisement */
 static ble_uuid128_t adv_svc_uuid = SOVA_SERVICE_UUID;
@@ -143,7 +143,8 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg) {
                  event->connect.status);
 
         if (event->connect.status == 0) {
-            peer_connected = true;
+            peer_count++;
+            gatt_svc_add_client(event->connect.conn_handle);
 
             rc = ble_gap_conn_find(event->connect.conn_handle, &desc);
             if (rc != 0) {
@@ -152,9 +153,11 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg) {
             }
             print_conn_desc(&desc);
 
+            ESP_LOGI(TAG, "клиентов подключено: %d", peer_count);
+
             /*
              * Запросить параметры соединения для активного режима:
-             *   interval 20-50ms, latency 0, timeout 4000ms
+             *   interval 20-50ms, latency 4, timeout 4000ms
              */
             struct ble_gap_upd_params params = {
                 .itvl_min = BLE_GAP_INITIAL_CONN_ITVL_MIN, /* ~30ms */
@@ -167,19 +170,28 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg) {
                 ESP_LOGW(TAG, "conn params update failed: %d (не критично)",
                          rc);
             }
+
+            /* Перезапуск advertising для приёма следующего клиента */
+            start_advertising();
         } else {
-            peer_connected = false;
             start_advertising();
         }
         return rc;
 
     /* Отключение */
-    case BLE_GAP_EVENT_DISCONNECT:
-        ESP_LOGI(TAG, "disconnected; reason=%d", event->disconnect.reason);
-        peer_connected = false;
-        sensor_task_subscribe(false);
+    case BLE_GAP_EVENT_DISCONNECT: {
+        uint16_t dh = event->disconnect.conn.conn_handle;
+        ESP_LOGI(TAG, "disconnected: conn=%d reason=%d",
+                 dh, event->disconnect.reason);
+        if (peer_count > 0) {
+            peer_count--;
+        }
+        gatt_svc_remove_client(dh);
+        sensor_task_remove_subscriber(dh);
+        ESP_LOGI(TAG, "клиентов подключено: %d", peer_count);
         start_advertising();
         return rc;
+    }
 
     /* Обновление параметров соединения */
     case BLE_GAP_EVENT_CONN_UPDATE:
@@ -303,7 +315,7 @@ const char *gap_get_own_mac(void) {
     return own_mac;
 }
 
-/* Проверить, подключён ли клиент */
+/* Проверить, подключён ли хотя бы один клиент */
 bool gap_is_connected(void) {
-    return peer_connected;
+    return peer_count > 0;
 }

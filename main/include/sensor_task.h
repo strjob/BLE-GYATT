@@ -4,8 +4,8 @@
  *
  * Периодическая задача отправки данных датчика по BLE.
  *
- * Управляет подпиской: при активной подписке читает датчик
- * и отправляет AD (auto-data) сообщения через gatt_svc_notify().
+ * Multi-Central: каждый клиент может независимо подписаться (W/ON)
+ * и получать AD нотификации через свой BLE connection handle.
  */
 #ifndef SENSOR_TASK_H
 #define SENSOR_TASK_H
@@ -17,16 +17,16 @@
 /* Создать FreeRTOS задачу периодической отправки */
 esp_err_t sensor_task_init(void);
 
-/* Установить адрес подписчика (FROM из W/ON команды) */
-void sensor_task_set_subscriber(const char *subscriber);
+/* Добавить подписку: from = адрес Central (FROM из W/ON), conn_handle = BLE соединение */
+void sensor_task_add_subscriber(const char *from, uint16_t conn_handle);
 
-/* Включить/выключить подписку */
-void sensor_task_subscribe(bool enable);
+/* Удалить подписку по conn_handle (W/OFF или disconnect) */
+void sensor_task_remove_subscriber(uint16_t conn_handle);
 
 /* Установить интервал отправки (мс). Возвращает фактический интервал. */
 uint32_t sensor_task_set_interval(uint32_t interval_ms);
 
-/* Текущее состояние подписки */
+/* Есть ли хотя бы один активный подписчик (для GET_INFO) */
 bool sensor_task_is_subscribed(void);
 
 /* Текущий интервал отправки (мс) */

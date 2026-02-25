@@ -2,17 +2,28 @@
  * SPDX-FileCopyrightText: 2024 SOVA Project
  * SPDX-License-Identifier: Unlicense OR CC0-1.0
  *
- * SOVA GATT Service.
+ * SOVA GATT Service — Multi-Central.
  *
  * Один сервис с двумя характеристиками:
  *   TX (Write | Write Without Response) — приложение отправляет команды датчику
  *   RX (Notify)                         — датчик отправляет ответы приложению
  *
- * При записи в TX вызывается Subas-обработчик, ответ отправляется через RX notify.
+ * Поддержка до MAX_CLIENTS одновременных подключений.
+ * Каждый клиент имеет независимое состояние notify-подписки.
+ * Ответ на команду отправляется конкретному клиенту (gatt_svc_notify_to),
+ * AD нотификации отправляются каждому подписчику из sensor_task.
+ *
+ * Потокобезопасность:
+ *   s_clients[] модифицируется только из NimBLE host task (subscribe_cb, add/remove).
+ *   gatt_svc_notify_to() вызывается из NimBLE task и Sensor Task — читает
+ *   s_clients[] без блокировки (bool/uint16_t атомарны на 32-bit,
+ *   worst case — benign failed notification при race с disconnect).
  */
 #include "gatt_svc.h"
 #include "common.h"
 #include "subas_handler.h"
+
+#define MAX_CLIENTS CONFIG_BT_NIMBLE_MAX_CONNECTIONS
 
 /* Прототипы callback-функций для характеристик */
 static int tx_chr_access(uint16_t conn_handle, uint16_t attr_handle,
@@ -29,10 +40,14 @@ static const ble_uuid128_t sova_rx_chr_uuid = SOVA_RX_CHR_UUID;
 static uint16_t tx_chr_val_handle;
 static uint16_t rx_chr_val_handle;
 
-/* Состояние подключения и подписки */
-static uint16_t notify_conn_handle = 0;
-static bool notify_conn_handle_valid = false;
-static bool notify_enabled = false;
+/* Состояние подключённых клиентов */
+typedef struct {
+    uint16_t conn_handle;
+    bool     connected;      /* слот занят */
+    bool     notify_enabled; /* клиент подписан на RX notify */
+} client_slot_t;
+
+static client_slot_t s_clients[MAX_CLIENTS];
 
 /* Таблица GATT сервисов */
 static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
@@ -65,7 +80,8 @@ static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
 
 /*
  * Callback записи в TX характеристику.
- * Получает Subas сообщение от приложения, обрабатывает и отправляет ответ.
+ * Получает Subas сообщение от приложения, обрабатывает и отправляет ответ
+ * обратно тому же клиенту через conn_handle.
  */
 static int tx_chr_access(uint16_t conn_handle, uint16_t attr_handle,
                          struct ble_gatt_access_ctxt *ctxt, void *arg) {
@@ -93,15 +109,16 @@ static int tx_chr_access(uint16_t conn_handle, uint16_t attr_handle,
     ESP_LOGI(TAG, "TX write: %.*s (conn=%d, len=%d)",
              copied, (char *)input_buf, conn_handle, copied);
 
-    /* Обработать Subas сообщение */
+    /* Обработать Subas сообщение (conn_handle для routing и RSSI) */
     uint8_t output_buf[SUBAS_MAX_MSG_LEN];
     uint16_t response_len = subas_handle_message(input_buf, copied,
                                                   output_buf,
-                                                  sizeof(output_buf));
+                                                  sizeof(output_buf),
+                                                  conn_handle);
 
-    /* Отправить ответ через RX notify */
+    /* Отправить ответ обратно тому же клиенту */
     if (response_len > 0) {
-        gatt_svc_notify(output_buf, response_len);
+        gatt_svc_notify_to(conn_handle, output_buf, response_len);
     }
 
     return 0;
@@ -117,24 +134,84 @@ static int rx_chr_access(uint16_t conn_handle, uint16_t attr_handle,
     return BLE_ATT_ERR_UNLIKELY;
 }
 
-/* Отправить нотификацию подключённому клиенту через RX характеристику */
-void gatt_svc_notify(const uint8_t *data, uint16_t len) {
-    if (!notify_enabled || !notify_conn_handle_valid) {
-        ESP_LOGW(TAG, "notify: клиент не подписан (enabled=%d, valid=%d)",
-                 notify_enabled, notify_conn_handle_valid);
-        return;
+/* Отправить нотификацию конкретному клиенту */
+void gatt_svc_notify_to(uint16_t conn_handle, const uint8_t *data,
+                         uint16_t len) {
+    /* Найти слот клиента и проверить подписку */
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (s_clients[i].connected &&
+            s_clients[i].conn_handle == conn_handle) {
+            if (!s_clients[i].notify_enabled) {
+                ESP_LOGW(TAG, "notify_to: клиент conn=%d не подписан",
+                         conn_handle);
+                return;
+            }
+
+            struct os_mbuf *om = ble_hs_mbuf_from_flat(data, len);
+            if (om == NULL) {
+                ESP_LOGE(TAG, "notify_to: не удалось выделить mbuf");
+                return;
+            }
+
+            int rc = ble_gatts_notify_custom(conn_handle,
+                                              rx_chr_val_handle, om);
+            if (rc != 0) {
+                ESP_LOGE(TAG, "notify_to: ошибка conn=%d: %d",
+                         conn_handle, rc);
+            }
+            return;
+        }
     }
 
-    struct os_mbuf *om = ble_hs_mbuf_from_flat(data, len);
-    if (om == NULL) {
-        ESP_LOGE(TAG, "notify: не удалось выделить mbuf");
-        return;
-    }
+    ESP_LOGW(TAG, "notify_to: клиент conn=%d не найден", conn_handle);
+}
 
-    int rc = ble_gatts_notify_custom(notify_conn_handle, rx_chr_val_handle,
-                                     om);
-    if (rc != 0) {
-        ESP_LOGE(TAG, "notify: ошибка отправки: %d", rc);
+/* Отправить нотификацию всем подписанным клиентам */
+void gatt_svc_notify_all(const uint8_t *data, uint16_t len) {
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (s_clients[i].connected && s_clients[i].notify_enabled) {
+            struct os_mbuf *om = ble_hs_mbuf_from_flat(data, len);
+            if (om == NULL) {
+                ESP_LOGE(TAG, "notify_all: не удалось выделить mbuf");
+                return;
+            }
+
+            int rc = ble_gatts_notify_custom(s_clients[i].conn_handle,
+                                              rx_chr_val_handle, om);
+            if (rc != 0) {
+                ESP_LOGE(TAG, "notify_all: ошибка conn=%d: %d",
+                         s_clients[i].conn_handle, rc);
+            }
+        }
+    }
+}
+
+/* Зарегистрировать новое подключение */
+void gatt_svc_add_client(uint16_t conn_handle) {
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (!s_clients[i].connected) {
+            s_clients[i].conn_handle = conn_handle;
+            s_clients[i].connected = true;
+            s_clients[i].notify_enabled = false;
+            ESP_LOGI(TAG, "клиент добавлен: conn=%d слот=%d",
+                     conn_handle, i);
+            return;
+        }
+    }
+    ESP_LOGW(TAG, "нет свободных слотов для conn=%d", conn_handle);
+}
+
+/* Удалить клиента при отключении */
+void gatt_svc_remove_client(uint16_t conn_handle) {
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (s_clients[i].connected &&
+            s_clients[i].conn_handle == conn_handle) {
+            s_clients[i].connected = false;
+            s_clients[i].notify_enabled = false;
+            ESP_LOGI(TAG, "клиент удалён: conn=%d слот=%d",
+                     conn_handle, i);
+            return;
+        }
     }
 }
 
@@ -169,29 +246,31 @@ void gatt_svr_register_cb(struct ble_gatt_register_ctxt *ctxt, void *arg) {
 
 /* Callback подписки клиента на нотификации RX характеристики */
 void gatt_svr_subscribe_cb(struct ble_gap_event *event) {
-    ESP_LOGI(TAG, "subscribe: conn=%d attr=%d notify=%d->%d indicate=%d->%d",
-             event->subscribe.conn_handle, event->subscribe.attr_handle,
-             event->subscribe.prev_notify, event->subscribe.cur_notify,
-             event->subscribe.prev_indicate, event->subscribe.cur_indicate);
-
-    /* Проверяем подписку на RX характеристику */
-    if (event->subscribe.attr_handle == rx_chr_val_handle) {
-        notify_conn_handle = event->subscribe.conn_handle;
-        notify_conn_handle_valid = true;
-        notify_enabled = event->subscribe.cur_notify;
-        ESP_LOGI(TAG, "RX notify %s",
-                 notify_enabled ? "включён" : "выключен");
+    if (event->subscribe.attr_handle != rx_chr_val_handle) {
+        return;
     }
-}
 
-/* Получить conn_handle текущего подключённого клиента */
-uint16_t gatt_svc_get_conn_handle(void) {
-    return notify_conn_handle_valid ? notify_conn_handle : BLE_HS_CONN_HANDLE_NONE;
+    uint16_t ch = event->subscribe.conn_handle;
+    bool enabled = event->subscribe.cur_notify;
+
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (s_clients[i].connected && s_clients[i].conn_handle == ch) {
+            s_clients[i].notify_enabled = enabled;
+            ESP_LOGI(TAG, "RX notify %s: conn=%d слот=%d",
+                     enabled ? "включён" : "выключен", ch, i);
+            return;
+        }
+    }
+
+    ESP_LOGW(TAG, "subscribe: клиент conn=%d не найден", ch);
 }
 
 /* Инициализация GATT сервиса */
 int gatt_svc_init(void) {
     int rc;
+
+    /* Очистить таблицу клиентов */
+    memset(s_clients, 0, sizeof(s_clients));
 
     /* Инициализировать GATT service */
     ble_svc_gatt_init();
@@ -210,6 +289,7 @@ int gatt_svc_init(void) {
         return rc;
     }
 
-    ESP_LOGI(TAG, "GATT сервис инициализирован");
+    ESP_LOGI(TAG, "GATT сервис инициализирован (макс. %d клиентов)",
+             MAX_CLIENTS);
     return 0;
 }

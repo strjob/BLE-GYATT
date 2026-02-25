@@ -17,14 +17,13 @@
 /*
  * Обработать входящее Subas сообщение, сгенерировать ответ.
  *
- * Поддерживаемые операции:
- *   PING      → PONG
- *   GET_INFO  → INFO с JSON (fw version, тип, батарея)
- *   *         → Echo (свап TO/FROM, возврат OP/DATA как есть)
+ * conn_handle — BLE connection handle клиента, отправившего команду.
+ * Используется для: RSSI измерения, привязки подписки к соединению.
  *
  * Возвращает длину ответа в output, 0 если ответ не нужен.
  */
 uint16_t subas_handle_message(const uint8_t *input, uint16_t input_len,
-                              uint8_t *output, uint16_t output_max_len);
+                              uint8_t *output, uint16_t output_max_len,
+                              uint16_t conn_handle);
 
 #endif /* SUBAS_HANDLER_H */

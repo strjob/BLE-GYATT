@@ -6,6 +6,9 @@ CONFIG_BT_NIMBLE_50_FEATURE_SUPPORT=n
 # MTU 247 — максимум для BLE 5, вмещает полное Subas сообщение
 CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=247
 
+# Multi-Central: до 3 одновременных подключений
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=3
+
 # Power Management
 CONFIG_PM_ENABLE=y
 CONFIG_FREERTOS_USE_TICKLESS_IDLE=y

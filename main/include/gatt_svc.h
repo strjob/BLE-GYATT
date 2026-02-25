@@ -3,6 +3,9 @@
  * SPDX-License-Identifier: Unlicense OR CC0-1.0
  *
  * SOVA GATT Service — TX/RX характеристики для Subas протокола.
+ *
+ * Multi-Central: поддержка до CONFIG_BT_NIMBLE_MAX_CONNECTIONS клиентов.
+ * Каждый клиент имеет свой conn_handle и независимое состояние notify.
  */
 #ifndef GATT_SVR_H
 #define GATT_SVR_H
@@ -17,16 +20,24 @@
 /* Инициализация GATT сервиса (вызывать после nimble_port_init) */
 int gatt_svc_init(void);
 
-/* Отправить нотификацию подключённому клиенту через RX характеристику */
-void gatt_svc_notify(const uint8_t *data, uint16_t len);
+/* Отправить нотификацию конкретному клиенту по conn_handle.
+ * Проверяет, что клиент подписан на RX notify. */
+void gatt_svc_notify_to(uint16_t conn_handle, const uint8_t *data,
+                         uint16_t len);
+
+/* Отправить нотификацию всем подписанным клиентам */
+void gatt_svc_notify_all(const uint8_t *data, uint16_t len);
+
+/* Зарегистрировать новое подключение (вызывается из gap.c при BLE_GAP_EVENT_CONNECT) */
+void gatt_svc_add_client(uint16_t conn_handle);
+
+/* Удалить клиента при отключении (вызывается из gap.c при BLE_GAP_EVENT_DISCONNECT) */
+void gatt_svc_remove_client(uint16_t conn_handle);
 
 /* Callback регистрации GATT сервисов (для логирования) */
 void gatt_svr_register_cb(struct ble_gatt_register_ctxt *ctxt, void *arg);
 
 /* Callback подписки клиента на нотификации */
 void gatt_svr_subscribe_cb(struct ble_gap_event *event);
-
-/* Получить conn_handle текущего подключённого клиента (BLE_HS_CONN_HANDLE_NONE если нет) */
-uint16_t gatt_svc_get_conn_handle(void);
 
 #endif /* GATT_SVR_H */

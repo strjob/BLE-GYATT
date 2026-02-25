@@ -18,7 +18,6 @@
 #include "subas_handler.h"
 #include "common.h"
 #include "gap.h"
-#include "gatt_svc.h"
 #include "sensor.h"
 #include "sensor_task.h"
 
@@ -113,7 +112,8 @@ static bool parse_subas(const char *msg, uint16_t len,
 }
 
 uint16_t subas_handle_message(const uint8_t *input, uint16_t input_len,
-                              uint8_t *output, uint16_t output_max_len) {
+                              uint8_t *output, uint16_t output_max_len,
+                              uint16_t conn_handle) {
     char to[FIELD_MAX_LEN] = {0};
     char from[FIELD_MAX_LEN] = {0};
     char op[FIELD_MAX_LEN] = {0};
@@ -163,12 +163,9 @@ uint16_t subas_handle_message(const uint8_t *input, uint16_t input_len,
     else if (strcmp(op, "R") == 0) {
         sensor_reading_t reading;
         if (sensor_read(&reading) == ESP_OK) {
-            /* Измеряем RSSI подключённого клиента */
+            /* Измеряем RSSI клиента, отправившего команду */
             int8_t rssi = 0;
-            uint16_t ch = gatt_svc_get_conn_handle();
-            if (ch != BLE_HS_CONN_HANDLE_NONE) {
-                ble_gap_conn_rssi(ch, &rssi);
-            }
+            ble_gap_conn_rssi(conn_handle, &rssi);
             written = snprintf((char *)output, output_max_len,
                                "#%s/%s/AD/%.1f/%.1f/%d$",
                                from, gap_get_own_mac(),
@@ -183,13 +180,12 @@ uint16_t subas_handle_message(const uint8_t *input, uint16_t input_len,
     /* W (write) — управление подпиской и общая запись */
     else if (strcmp(op, "W") == 0) {
         if (strcmp(data, "ON") == 0) {
-            /* Запомнить адрес подписчика и включить подписку */
-            sensor_task_set_subscriber(from);
-            sensor_task_subscribe(true);
+            /* Подписать этого клиента на периодические AD нотификации */
+            sensor_task_add_subscriber(from, conn_handle);
             written = snprintf((char *)output, output_max_len,
                                "#%s/%s/AM/ON$", from, gap_get_own_mac());
         } else if (strcmp(data, "OFF") == 0) {
-            sensor_task_subscribe(false);
+            sensor_task_remove_subscriber(conn_handle);
             written = snprintf((char *)output, output_max_len,
                                "#%s/%s/AM/OFF$", from, gap_get_own_mac());
         } else if (strncmp(data, "Time=", 5) == 0) {
