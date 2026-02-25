@@ -13,6 +13,7 @@
  */
 #include "sensor_task.h"
 #include "common.h"
+#include "gap.h"
 #include "sensor.h"
 #include "gatt_svc.h"
 #include "subas_handler.h"
@@ -55,7 +56,7 @@ static void sensor_task_fn(void *param) {
             continue;
         }
 
-        /* Сформировать AD сообщение: #subscriber/SENSOR/AD/temp/hum$ */
+        /* Сформировать AD сообщение: #subscriber/SENSOR/AD/temp/hum/rssi$ */
         char subscriber[SUBSCRIBER_MAX_LEN];
 
         portENTER_CRITICAL(&s_subscriber_mux);
@@ -63,10 +64,18 @@ static void sensor_task_fn(void *param) {
         subscriber[sizeof(subscriber) - 1] = '\0';
         portEXIT_CRITICAL(&s_subscriber_mux);
 
+        /* Измеряем RSSI подключённого клиента */
+        int8_t rssi = 0;
+        uint16_t ch = gatt_svc_get_conn_handle();
+        if (ch != BLE_HS_CONN_HANDLE_NONE) {
+            ble_gap_conn_rssi(ch, &rssi);
+        }
+
         int written = snprintf((char *)msg_buf, sizeof(msg_buf),
-                               "#%s/%s/AD/%.1f/%.1f$",
-                               subscriber, SUBAS_DEVICE_NAME,
-                               reading.temperature, reading.humidity);
+                               "#%s/%s/AD/%.1f/%.1f/%d$",
+                               subscriber, gap_get_own_mac(),
+                               reading.temperature, reading.humidity,
+                               (int)rssi);
 
         if (written > 0 && written < (int)sizeof(msg_buf)) {
             ESP_LOGI(TAG, "AD: %.*s", written, (char *)msg_buf);

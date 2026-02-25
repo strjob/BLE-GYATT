@@ -26,4 +26,7 @@ void gatt_svr_register_cb(struct ble_gatt_register_ctxt *ctxt, void *arg);
 /* Callback подписки клиента на нотификации */
 void gatt_svr_subscribe_cb(struct ble_gap_event *event);
 
+/* Получить conn_handle текущего подключённого клиента (BLE_HS_CONN_HANDLE_NONE если нет) */
+uint16_t gatt_svc_get_conn_handle(void);
+
 #endif /* GATT_SVR_H */

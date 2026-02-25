@@ -17,6 +17,8 @@
  */
 #include "subas_handler.h"
 #include "common.h"
+#include "gap.h"
+#include "gatt_svc.h"
 #include "sensor.h"
 #include "sensor_task.h"
 
@@ -132,10 +134,10 @@ uint16_t subas_handle_message(const uint8_t *input, uint16_t input_len,
     int written = 0;
 
     /* Проверка адресата — команда должна быть адресована этому устройству */
-    if (strcmp(to, SUBAS_DEVICE_NAME) != 0) {
+    if (strcmp(to, gap_get_own_mac()) != 0) {
         ESP_LOGW(TAG, "неизвестный адресат: %s", to);
         written = snprintf((char *)output, output_max_len,
-                           "#%s/%s/NR$", from, SUBAS_DEVICE_NAME);
+                           "#%s/%s/NR$", from, gap_get_own_mac());
         if (written > 0 && written < (int)output_max_len) {
             ESP_LOGI(TAG, "TX: %.*s", written, (char *)output);
             return (uint16_t)written;
@@ -146,13 +148,13 @@ uint16_t subas_handle_message(const uint8_t *input, uint16_t input_len,
     /* Ответ на PING */
     if (strcmp(op, "PING") == 0) {
         written = snprintf((char *)output, output_max_len,
-                           "#%s/%s/PONG$", from, SUBAS_DEVICE_NAME);
+                           "#%s/%s/PONG$", from, gap_get_own_mac());
     }
     /* Ответ на GET_INFO — информация об устройстве */
     else if (strcmp(op, "GET_INFO") == 0) {
         written = snprintf((char *)output, output_max_len,
                            "#%s/%s/INFO/%s/%s/100/%ld/%s$",
-                           from, SUBAS_DEVICE_NAME,
+                           from, gap_get_own_mac(),
                            FW_VERSION, sensor_get_type(),
                            (long)sensor_task_get_interval(),
                            sensor_task_is_subscribed() ? "1" : "0");
@@ -161,14 +163,21 @@ uint16_t subas_handle_message(const uint8_t *input, uint16_t input_len,
     else if (strcmp(op, "R") == 0) {
         sensor_reading_t reading;
         if (sensor_read(&reading) == ESP_OK) {
+            /* Измеряем RSSI подключённого клиента */
+            int8_t rssi = 0;
+            uint16_t ch = gatt_svc_get_conn_handle();
+            if (ch != BLE_HS_CONN_HANDLE_NONE) {
+                ble_gap_conn_rssi(ch, &rssi);
+            }
             written = snprintf((char *)output, output_max_len,
-                               "#%s/%s/AD/%.1f/%.1f$",
-                               from, SUBAS_DEVICE_NAME,
-                               reading.temperature, reading.humidity);
+                               "#%s/%s/AD/%.1f/%.1f/%d$",
+                               from, gap_get_own_mac(),
+                               reading.temperature, reading.humidity,
+                               (int)rssi);
         } else {
             written = snprintf((char *)output, output_max_len,
                                "#%s/%s/ER/sensor_error$",
-                               from, SUBAS_DEVICE_NAME);
+                               from, gap_get_own_mac());
         }
     }
     /* W (write) — управление подпиской и общая запись */
@@ -178,11 +187,11 @@ uint16_t subas_handle_message(const uint8_t *input, uint16_t input_len,
             sensor_task_set_subscriber(from);
             sensor_task_subscribe(true);
             written = snprintf((char *)output, output_max_len,
-                               "#%s/%s/AM/ON$", from, SUBAS_DEVICE_NAME);
+                               "#%s/%s/AM/ON$", from, gap_get_own_mac());
         } else if (strcmp(data, "OFF") == 0) {
             sensor_task_subscribe(false);
             written = snprintf((char *)output, output_max_len,
-                               "#%s/%s/AM/OFF$", from, SUBAS_DEVICE_NAME);
+                               "#%s/%s/AM/OFF$", from, gap_get_own_mac());
         } else if (strncmp(data, "Time=", 5) == 0) {
             /* Разбор интервала: Time=N */
             long val = strtol(data + 5, NULL, 10);
@@ -190,23 +199,23 @@ uint16_t subas_handle_message(const uint8_t *input, uint16_t input_len,
                 uint32_t actual = sensor_task_set_interval((uint32_t)val);
                 written = snprintf((char *)output, output_max_len,
                                    "#%s/%s/AM/Time=%ld$",
-                                   from, SUBAS_DEVICE_NAME, (long)actual);
+                                   from, gap_get_own_mac(), (long)actual);
             } else {
                 written = snprintf((char *)output, output_max_len,
                                    "#%s/%s/EW/Time min 100$",
-                                   from, SUBAS_DEVICE_NAME);
+                                   from, gap_get_own_mac());
             }
         } else {
             /* Прочие W команды — подтверждение */
             written = snprintf((char *)output, output_max_len,
                                data[0] ? "#%s/%s/AW/%s$" : "#%s/%s/AW$",
-                               from, SUBAS_DEVICE_NAME, data);
+                               from, gap_get_own_mac(), data);
         }
     }
     /* Всё остальное — ответ A с echo DATA */
     else {
         written = snprintf((char *)output, output_max_len,
-                           "#%s/%s/A/%s$", from, SUBAS_DEVICE_NAME,
+                           "#%s/%s/A/%s$", from, gap_get_own_mac(),
                            data[0] ? data : op);
     }
 

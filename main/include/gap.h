@@ -20,4 +20,8 @@ int gap_init(void);
 /* Проверить, подключён ли клиент */
 bool gap_is_connected(void);
 
+/* Получить собственный BLE MAC в формате "aa:bb:cc:dd:ee:ff" (lowercase с двоеточиями).
+ * Валиден после вызова adv_init(). Используется как адрес в Subas протоколе. */
+const char *gap_get_own_mac(void);
+
 #endif /* GAP_SVC_H */

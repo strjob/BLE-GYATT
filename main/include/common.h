@@ -33,11 +33,14 @@
 /* Логирование */
 #define TAG "SOVA_BLE"
 
-/* Имя устройства в Subas-протоколе (адресация команд, из Kconfig) */
-#define SUBAS_DEVICE_NAME CONFIG_SUBAS_DEVICE_NAME
-
-/* Короткое имя устройства для BLE advertisement (4 символа, влезает в ADV рядом с UUID128) */
-#define DEVICE_NAME_SHORT "SOVA"
+/* Короткое имя устройства (device_type) для BLE advertisement.
+ * Используется как Shortened Local Name в ADV пакете для discovery (btleplug).
+ * Значение берётся из Kconfig (CONFIG_SUBAS_DEVICE_NAME), напр. "MOCK_TH", "DHT22".
+ * Ограничение: макс. 8 символов (31 - 3 Flags - 18 UUID128 - 2 header = 8).
+ *
+ * Примечание: адресация в Subas протоколе (TO/FROM) теперь по BLE MAC,
+ * а не по device_name. См. gap_get_own_mac(). */
+#define DEVICE_NAME_SHORT CONFIG_SUBAS_DEVICE_NAME
 #define DEVICE_NAME_MAX_LEN 16
 
 /*

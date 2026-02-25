@@ -184,6 +184,11 @@ void gatt_svr_subscribe_cb(struct ble_gap_event *event) {
     }
 }
 
+/* Получить conn_handle текущего подключённого клиента */
+uint16_t gatt_svc_get_conn_handle(void) {
+    return notify_conn_handle_valid ? notify_conn_handle : BLE_HS_CONN_HANDLE_NONE;
+}
+
 /* Инициализация GATT сервиса */
 int gatt_svc_init(void) {
     int rc;
