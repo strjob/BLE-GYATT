@@ -1,381 +1,218 @@
 | Supported Targets | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C5 | ESP32-C6 | ESP32-C61 | ESP32-H2 | ESP32-S3 |
-| ----------------- | ----- | -------- | -------- | -------- | -------- | --------- | -------- | -------- |
+| ----------------- | ----- | -------- | -------- | -------- | --------- | -------- | -------- | -------- |
 
-# NimBLE GATT Server Example
+# SOVA BLE Sensor
 
-## Overview
+Прошивка BLE GATT-сервера для ESP32 на базе NimBLE. Реализует кастомный SOVA Service с двумя характеристиками (TX/RX) для обмена сообщениями по текстовому протоколу Subas. Поддерживает одновременное подключение нескольких Central-устройств (Multi-Central).
 
-This example is extended from NimBLE Connection Example, and further introduces
+Разработана как BLE-транспорт для [sova-tauri](https://github.com/your-org/sova-tauri) — десктопного приложения для работы с датчиками.
 
-1. How to implement a GATT server using GATT services table
-2. How to handle characteristic access requests
-    1. Write access demonstrated by LED control
-    2. Read and indicate access demonstrated by heart rate measurement(mocked)
+## Сборка и прошивка
 
-To test this demo, install *nRF Connect for Mobile* on your phone. 
+Требуется ESP-IDF toolchain. В `.devcontainer/` есть конфигурация для Docker-образа `espressif/idf`.
 
-Please refer to [BLE Introduction](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-guides/ble/get-started/ble-introduction.html#:~:text=%E4%BE%8B%E7%A8%8B%E5%AE%9E%E8%B7%B5)
-for detailed example introduction and code explanation.
-
-## Try It Yourself
-
-### Set Target
-
-Before project configuration and build, be sure to set the correct chip target using:
-
-``` shell
-idf.py set-target <chip_name>
+```bash
+idf.py set-target esp32c6            # выбор чипа
+idf.py build                         # сборка
+idf.py -p <PORT> flash monitor       # прошивка + серийный монитор (Ctrl-] для выхода)
+idf.py menuconfig                    # конфигурация (тип датчика, LED, GPIO, интервал)
 ```
 
-For example, if you're using ESP32, then input
+## Архитектура
 
-``` Shell
-idf.py set-target esp32
+### Порядок инициализации
+
+Точка входа — `app_main()` в `main/main.c`:
+
+1. `led_init()` — настройка GPIO или LED strip
+2. `nvs_flash_init()` — NVS (NimBLE хранит там bonding data)
+3. `power_management_init()` — light sleep между BLE-событиями (опционально, через Kconfig)
+4. `sensor_init()` — инициализация датчика (mock или DHT22, выбирается в Kconfig)
+5. `nimble_port_init()` — запуск BLE-контроллера
+6. `gap_init()` — GAP-сервис, временное имя устройства
+7. `gatt_svc_init()` — регистрация GATT-сервиса с таблицей характеристик
+8. `nimble_host_config_init()` — привязка callbacks, MTU 247
+9. Запуск FreeRTOS-задач
+
+### FreeRTOS-задачи
+
+| Задача | Приоритет | Стек | Назначение |
+|--------|-----------|------|------------|
+| `nimble_host_task` | 5 | 4 KiB | Event loop NimBLE — обработка всех BLE-событий |
+| `sensor_task` | 4 | 3 KiB | Периодическое чтение датчика и рассылка notify подписчикам |
+| `status_led_task` | 3 | 2 KiB | LED-индикация: мигание (advertising) / горит (connected) |
+
+`nimble_host_task` вызывает `nimble_port_run()` — блокирующий event loop, который диспатчит все GAP/GATT-события в зарегистрированные callbacks.
+
+### Модули
+
+```
+main/
+├── main.c                  — Entry point, инициализация, создание задач
+├── include/
+│   └── common.h            — UUID defines, shared includes, TAG
+├── src/
+│   ├── gap.c               — GAP: advertising, connection management
+│   ├── gatt_svc.c          — GATT: SOVA Service, TX/RX характеристики, Multi-Central
+│   ├── subas_handler.c     — Парсер Subas-протокола, маршрутизация команд
+│   ├── sensor_mock.c       — Mock-датчик (градуальный дрифт T/H)
+│   ├── sensor_dht22.c      — DHT22 (AM2302) через RMT backend
+│   ├── sensor_task.c       — Периодическая рассылка данных подписчикам
+│   └── led.c               — LED-абстракция (GPIO / addressable LED strip)
 ```
 
-### Build and Flash
+## BLE: GAP и Advertising
 
-Run the following command to build, flash and monitor the project.
+При синхронизации NimBLE-стека (`on_stack_sync`) вызывается `adv_init()`, которая:
 
-``` Shell
-idf.py -p <PORT> flash monitor
+1. Получает BLE MAC-адрес устройства
+2. Формирует имя `SOVA-XXXX` (последние 2 байта MAC) для GAP Device Name
+3. Запускает advertising
+
+### Advertisement Packet (31 байт макс.)
+
+| Поле | Размер | Значение |
+|------|--------|----------|
+| Flags | 3 B | `DISC_GEN \| BREDR_UNSUP` — General Discoverable, только BLE |
+| 128-bit Service UUID | 18 B | SOVA Service UUID — для фильтрации при сканировании |
+| Shortened Local Name | 2+N B | `CONFIG_SUBAS_DEVICE_NAME` (например `MOCK_TH`, `DHT22`) |
+
+Shortened Local Name используется как device_type для discovery. Полное имя `SOVA-XXXX` доступно через GAP Device Name после подключения. Complete Local Name намеренно не включён в Scan Response — btleplug на Windows мержит ADV + Scan Response, и Complete Name перезатирает Shortened.
+
+### Scan Response
+
+Содержит только TX Power Level. Имя убрано по причине выше.
+
+### Параметры
+
+- Режим: `UND` (undirected connectable) — любое устройство может подключиться
+- Интервал: 100–150 мс
+- После подключения клиента advertising **перезапускается** для приёма следующих подключений (Multi-Central)
+
+## BLE: GATT Service
+
+### SOVA Service
+
+| Элемент | UUID (128-bit) | Permissions |
+|---------|----------------|-------------|
+| **SOVA Sensor Service** | `33904903-971A-442F-803B-ABB332FCF9D2` | — |
+| TX (App → Sensor) | `ECFC5128-3AE4-4A07-A46D-57423FD44703` | Write, Write Without Response |
+| RX (Sensor → App) | `04B66E35-71D6-4E89-B43D-E83E2AB2CD29` | Notify |
+
+UUID определены в `common.h` в little-endian (порядок NimBLE). Совпадают с `config/config.json` в sova-tauri.
+
+### TX — приём команд
+
+Callback `tx_chr_access()` срабатывает при записи в TX. Данные извлекаются из mbuf-цепочки, передаются в `subas_handle_message()`, ответ отправляется через `gatt_svc_notify_to()` конкретному клиенту по `conn_handle`.
+
+### RX — отправка через Notify
+
+RX-характеристика доступна только через Notify. Клиент должен подписаться, записав в CCCD (Client Characteristic Configuration Descriptor). При подписке NimBLE генерирует `BLE_GAP_EVENT_SUBSCRIBE`, обработчик `gatt_svr_subscribe_cb()` ставит флаг `notify_enabled` для данного клиента в таблице `s_clients[]`.
+
+Две функции отправки:
+- `gatt_svc_notify_to(conn_handle, data, len)` — конкретному клиенту (ответы на команды, периодические данные)
+- `gatt_svc_notify_all(data, len)` — всем подписанным (broadcast)
+
+Обе используют `ble_gatts_notify_custom()` с аллокацией `os_mbuf` под каждую отправку.
+
+### Multi-Central
+
+Таблица `s_clients[MAX_CLIENTS]` хранит состояние каждого подключения (`conn_handle`, `connected`, `notify_enabled`). `MAX_CLIENTS` берётся из `CONFIG_BT_NIMBLE_MAX_CONNECTIONS`.
+
+Потокобезопасность: `s_clients[]` модифицируется только из NimBLE Host Task (subscribe, add, remove). Чтение из Sensor Task в `gatt_svc_notify_to()` без блокировки — worst case: один пропущенный notify при race с disconnect.
+
+## Протокол Subas
+
+Текстовый протокол поверх BLE-характеристик. Формат сообщения:
+
+```
+#TO/FROM/OP$          — без данных
+#TO/FROM/OP/DATA$     — с данными
 ```
 
-For example, if the corresponding serial port is `/dev/ttyACM0`, then it goes
+Адресация по BLE MAC-адресу устройства (lowercase с двоеточиями: `aa:bb:cc:dd:ee:ff`).
 
-``` Shell
-idf.py -p /dev/ttyACM0 flash monitor
+### Команды
+
+| Входящее сообщение | Ответ | Описание |
+|--------------------|-------|----------|
+| `#mac/APP/PING$` | `#APP/mac/PONG$` | Проверка связи |
+| `#mac/APP/GET_INFO$` | `#APP/mac/INFO/fw/type/bat/interval/subscribed$` | Информация об устройстве |
+| `#mac/APP/R$` | `#APP/mac/AD/T/H/RSSI$` | Одноразовое чтение датчика |
+| `#mac/APP/W/ON$` | `#APP/mac/AM/ON$` | Старт периодической подписки |
+| `#mac/APP/W/OFF$` | `#APP/mac/AM/OFF$` | Стоп подписки |
+| `#mac/APP/W/Time=N$` | `#APP/mac/AM/Time=N$` | Установка интервала (мс, мин. 100) |
+| `#mac/APP/W/DATA$` | `#APP/mac/AW/DATA$` | Acknowledge write |
+| `#wrong_mac/APP/OP$` | `#APP/mac/NR$` | Not routed — адресат не совпадает |
+
+Парсер (`subas_handler.c`) находит маркеры `#` и `$`, разбивает содержимое по `/` на поля TO, FROM, OP, DATA.
+
+## Два режима отправки данных датчика
+
+### По запросу (команда `R`)
+
+Синхронная обработка внутри NimBLE Host Task:
+
+```
+TX write → tx_chr_access() → subas_handle_message() → sensor_read()
+→ gatt_svc_notify_to(conn_handle) → клиент получает notify
 ```
 
-(To exit the serial monitor, type ``Ctrl-]``.)
-
-See the [Getting Started Guide](https://idf.espressif.com/) for full steps to configure and use ESP-IDF to build projects.
-
-## Code Explained
-
-### Overview
-
-1. Initialization
-    1. Initialize LED, NVS flash, NimBLE host stack, GAP service
-    2. Initialize GATT service and add services to registration queue
-    3. Configure NimBLE host stack and start NimBLE host task thread, GATT services will be registered automatically when NimBLE host stack started
-    4. Start heart rate update task thread
-2. Wait for NimBLE host stack to sync with BLE controller, and start advertising; wait for connection event to come
-3. After connection established, wait for GATT characteristics access events to come
-    1. On write LED event, turn on or off the LED accordingly
-    2. On read heart rate event, send out current heart rate measurement value
-    3. On indicate heart rate event, enable heart rate indication
-
-### Entry Point
+Одно чтение — один ответ — конкретному клиенту, который запросил.
 
-In this example, we call GATT `gatt_svr_init` function to initialize GATT server in `app_main` before NimBLE host configuration. This is a custom function defined in `gatt_svc.c`, and basically we just call GATT service initialization API and add services to registration queue.
-
-And there's another code added in `nimble_host_config_init`, which is 
-
-``` C
-static void nimble_host_config_init(void) {
-    ...
-
-    ble_hs_cfg.gatts_register_cb = gatt_svr_register_cb;
-
-    ...
-}
-```
-
-That is GATT server register callback function. In this case it will only print out some registration information when services, characteristics or descriptors are registered.
-
-Then, after NimBLE host task thread is created, we'll create another task defined in `heart_rate_task` to update heart rate measurement mock value and send indication if enabled.
-
-### GAP Service Updates
-
-`gap_event_handler` is updated with LED control removed, and more event handling branches, when compared to NimBLE Connection Example, including
-
-- `BLE_GAP_EVENT_ADV_COMPLETE` - Advertising complete event
-- `BLE_GAP_EVENT_NOTIFY_TX` - Notificate event
-- `BLE_GAP_EVENT_SUBSCRIBE` - Subscribe event
-- `BLE_GAP_EVENT_MTU` - MTU update event
-
-`BLE_GAP_EVENT_ADV_COMPLETE` and `BLE_GAP_EVENT_MTU` events are actually not involved in this example, but we still put them down there for reference. `BLE_GAP_EVENT_NOTIFY_TX` and `BLE_GAP_EVENT_SUBSCRIBE` events will be discussed in the next section.
-
-### GATT Services Table
-
-GATT services are defined in `ble_gatt_svc_def` struct array, with a variable name `gatt_svr_svcs` in this demo. We'll call it as the GATT services table in the following content.
-
-``` C
-/* Heart rate service */
-static const ble_uuid16_t heart_rate_svc_uuid = BLE_UUID16_INIT(0x180D);
-
-static uint8_t heart_rate_chr_val[2] = {0};
-static uint16_t heart_rate_chr_val_handle;
-static const ble_uuid16_t heart_rate_chr_uuid = BLE_UUID16_INIT(0x2A37);
-
-static uint16_t heart_rate_chr_conn_handle = 0;
-static bool heart_rate_chr_conn_handle_inited = false;
-static bool heart_rate_ind_status = false;
-
-/* Automation IO service */
-static const ble_uuid16_t auto_io_svc_uuid = BLE_UUID16_INIT(0x1815);
-static uint16_t led_chr_val_handle;
-static const ble_uuid128_t led_chr_uuid =
-    BLE_UUID128_INIT(0x23, 0xd1, 0xbc, 0xea, 0x5f, 0x78, 0x23, 0x15, 0xde, 0xef,
-                     0x12, 0x12, 0x25, 0x15, 0x00, 0x00);
-
-/* GATT services table */
-static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
-    /* Heart rate service */
-    {.type = BLE_GATT_SVC_TYPE_PRIMARY,
-     .uuid = &heart_rate_svc_uuid.u,
-     .characteristics =
-         (struct ble_gatt_chr_def[]){
-             {/* Heart rate characteristic */
-              .uuid = &heart_rate_chr_uuid.u,
-              .access_cb = heart_rate_chr_access,
-              .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_INDICATE,
-              .val_handle = &heart_rate_chr_val_handle},
-             {
-                 0, /* No more characteristics in this service. */
-             }}},
-
-    /* Automation IO service */
-    {
-        .type = BLE_GATT_SVC_TYPE_PRIMARY,
-        .uuid = &auto_io_svc_uuid.u,
-        .characteristics =
-            (struct ble_gatt_chr_def[]){/* LED characteristic */
-                                        {.uuid = &led_chr_uuid.u,
-                                         .access_cb = led_chr_access,
-                                         .flags = BLE_GATT_CHR_F_WRITE,
-                                         .val_handle = &led_chr_val_handle},
-                                        {0}},
-    },
-    
-    {
-        0, /* No more services. */
-    },
-};
-```
-
-In this table, there are two GATT primary services defined
-
-- Heart rate service with a UUID of `0x180D`
-- Automation IO service with a UUID of `0x1815`
-
-#### Automation IO Service
-
-Under automation IO service, there's a LED characteristic, with a vendor-specific UUID and write only permission.
-
-The characteristic is binded with `led_chr_access` callback function, in which the write access event is captured. The LED will be turned on or off according to the write value, quite straight-forward.
-
-``` C
-static int led_chr_access(uint16_t conn_handle, uint16_t attr_handle,
-                          struct ble_gatt_access_ctxt *ctxt, void *arg) {
-    /* Local variables */
-    int rc;
-
-    /* Handle access events */
-    /* Note: LED characteristic is write only */
-    switch (ctxt->op) {
-
-    /* Write characteristic event */
-    case BLE_GATT_ACCESS_OP_WRITE_CHR:
-        /* Verify connection handle */
-        if (conn_handle != BLE_HS_CONN_HANDLE_NONE) {
-            ESP_LOGI(TAG, "characteristic write; conn_handle=%d attr_handle=%d",
-                     conn_handle, attr_handle);
-        } else {
-            ESP_LOGI(TAG,
-                     "characteristic write by nimble stack; attr_handle=%d",
-                     attr_handle);
-        }
-
-        /* Verify attribute handle */
-        if (attr_handle == led_chr_val_handle) {
-            /* Verify access buffer length */
-            if (ctxt->om->om_len == 1) {
-                /* Turn the LED on or off according to the operation bit */
-                if (ctxt->om->om_data[0]) {
-                    led_on();
-                    ESP_LOGI(TAG, "led turned on!");
-                } else {
-                    led_off();
-                    ESP_LOGI(TAG, "led turned off!");
-                }
-            } else {
-                goto error;
-            }
-            return rc;
-        }
-        goto error;
-
-    /* Unknown event */
-    default:
-        goto error;
-    }
-
-error:
-    ESP_LOGE(TAG,
-             "unexpected access operation to led characteristic, opcode: %d",
-             ctxt->op);
-    return BLE_ATT_ERR_UNLIKELY;
-}
-```
-
-#### Heart Rate Service
-
-Under heart rate service, there's a heart rate measurement characteristic, with a UUID of `0x2A37` and read + indicate access permission.
-
-The characteristic is binded with `heart_rate_chr_access` callback function, in which the read access event is captured. It should be mentioned that in SIG definition, heart rate measurement is a multi-byte data structure, with the first byte indicating the flags
-
-- Bit 0: Heart rate value type
-    - 0: Heart rate value is `uint8_t` type
-    - 1: Heart rate value is `uint16_t` type
-- Bit 1: Sensor contact status
-- Bit 2: Sensor contact supported
-- Bit 3: Energy expended status
-- Bit 4: RR-interval status
-- Bit 5-7: Reserved
-
-and the rest of bytes are data fields. In this case, we use `uint8_t` type and disable other features, making the characteristic value a 2-byte array. So when characteristic read event arrives, we'll get the latest heart rate value and send it back to peer device.
-
-``` C
-static int heart_rate_chr_access(uint16_t conn_handle, uint16_t attr_handle,
-                                 struct ble_gatt_access_ctxt *ctxt, void *arg) {
-    /* Local variables */
-    int rc;
-
-    /* Handle access events */
-    /* Note: Heart rate characteristic is read only */
-    switch (ctxt->op) {
-
-    /* Read characteristic event */
-    case BLE_GATT_ACCESS_OP_READ_CHR:
-        /* Verify connection handle */
-        if (conn_handle != BLE_HS_CONN_HANDLE_NONE) {
-            ESP_LOGI(TAG, "characteristic read; conn_handle=%d attr_handle=%d",
-                     conn_handle, attr_handle);
-        } else {
-            ESP_LOGI(TAG, "characteristic read by nimble stack; attr_handle=%d",
-                     attr_handle);
-        }
-
-        /* Verify attribute handle */
-        if (attr_handle == heart_rate_chr_val_handle) {
-            /* Update access buffer value */
-            heart_rate_chr_val[1] = get_heart_rate();
-            rc = os_mbuf_append(ctxt->om, &heart_rate_chr_val,
-                                sizeof(heart_rate_chr_val));
-            return rc == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
-        }
-        goto error;
-
-    /* Unknown event */
-    default:
-        goto error;
-    }
-
-error:
-    ESP_LOGE(
-        TAG,
-        "unexpected access operation to heart rate characteristic, opcode: %d",
-        ctxt->op);
-    return BLE_ATT_ERR_UNLIKELY;
-}
-```
-
-Indicate access, however, is a bit more complicated. As mentioned in *GAP Service Updates*, we'll handle another 2 events namely `BLE_GAP_EVENT_NOTIFY_TX` and `BLE_GAP_EVENT_SUBSCRIBE` in `gap_event_handler`. In this case, if peer device wants to enable heart rate measurement indication, it will send a subscribe request to the local device, and the request will be captured as a subscribe event in `gap_event_handler`. But from the perspective of software layering, the event should be handled in GATT server, so we just pass the event to GATT server by calling `gatt_svr_subscribe_cb`, as demonstrated in the demo
-
-``` C
-static int gap_event_handler(struct ble_gap_event *event, void *arg) {
-    ...
-
-    /* Subscribe event */
-    case BLE_GAP_EVENT_SUBSCRIBE:
-        /* Print subscription info to log */
-        ESP_LOGI(TAG,
-                    "subscribe event; conn_handle=%d attr_handle=%d "
-                    "reason=%d prevn=%d curn=%d previ=%d curi=%d",
-                    event->subscribe.conn_handle, event->subscribe.attr_handle,
-                    event->subscribe.reason, event->subscribe.prev_notify,
-                    event->subscribe.cur_notify, event->subscribe.prev_indicate,
-                    event->subscribe.cur_indicate);
-
-        /* GATT subscribe event callback */
-        gatt_svr_subscribe_cb(event);
-        return rc;
-    
-    ...
-}
-```
-
-Then we'll check connection handle and attribute handle, if the attribute handle matches `heart_rate_chr_val_chandle`, `heart_rate_chr_conn_handle` and `heart_rate_ind_status` will be updated together. 
-
-``` C
-void gatt_svr_subscribe_cb(struct ble_gap_event *event) {
-    /* Check connection handle */
-    if (event->subscribe.conn_handle != BLE_HS_CONN_HANDLE_NONE) {
-        ESP_LOGI(TAG, "subscribe event; conn_handle=%d attr_handle=%d",
-                 event->subscribe.conn_handle, event->subscribe.attr_handle);
-    } else {
-        ESP_LOGI(TAG, "subscribe by nimble stack; attr_handle=%d",
-                 event->subscribe.attr_handle);
-    }
-
-    /* Check attribute handle */
-    if (event->subscribe.attr_handle == heart_rate_chr_val_handle) {
-        /* Update heart rate subscription status */
-        heart_rate_chr_conn_handle = event->subscribe.conn_handle;
-        heart_rate_chr_conn_handle_inited = true;
-        heart_rate_ind_status = event->subscribe.cur_indicate;
-    }
-}
-```
-
-Notice that heart rate measurement incation is handled in `heart_rate_task` by calling `send_heart_rate_indication` function periodically. Actually, this function will check heart rate indication status and send indication accordingly. In this way, heart rate indication is implemented.
-
-``` C
-void send_heart_rate_indication(void) {
-    if (heart_rate_ind_status && heart_rate_chr_conn_handle_inited) {
-        ble_gatts_indicate(heart_rate_chr_conn_handle,
-                           heart_rate_chr_val_handle);
-        ESP_LOGI(TAG, "heart rate indication sent!");
-    }
-}
-
-static void heart_rate_task(void *param) {
-    /* Task entry log */
-    ESP_LOGI(TAG, "heart rate task has been started!");
-
-    /* Loop forever */
-    while (1) {
-        /* Update heart rate value every 1 second */
-        update_heart_rate();
-        ESP_LOGI(TAG, "heart rate updated to %d", get_heart_rate());
-
-        /* Send heart rate indication if enabled */
-        send_heart_rate_indication();
-
-        /* Sleep */
-        vTaskDelay(HEART_RATE_TASK_PERIOD);
-    }
-
-    /* Clean up at exit */
-    vTaskDelete(NULL);
-}
-```
-
-## Observation
-
-If everything goes well, you should be able to see 4 services when connected to ESP32, including
-
-- Generic Access
-- Generic Attribute
-- Heart Rate
-- Automation IO
-
-Click on Automation IO Service, you should be able to see LED characteristic. Click on upload button, you should be able to write `ON` or `OFF` value. Send it to the device, LED will be turned on or off following your instruction.
-
-Click on Heart Rate Service, you should be able to see Heart Rate Measurement characteristic. Click on download button, you should be able to see the latest heart rate measurement mock value, and it should be consistent with what is shown on serial output. Click on subscribe button, you should be able to see the heart rate measurement mock value updated every second.
-
-## Troubleshooting
-
-For any technical queries, please file an [issue](https://github.com/espressif/esp-idf/issues) on GitHub. We will get back to you soon.
+### Периодическая подписка (команда `W/ON`)
+
+Задействует отдельную FreeRTOS-задачу `sensor_task`:
+
+1. Команда `W/ON` из NimBLE Host Task вызывает `sensor_task_add_subscriber()`, которая записывает `{from, conn_handle}` в таблицу подписок `s_subs[]`
+2. `sensor_task_fn()` в бесконечном цикле проверяет наличие подписчиков
+3. Если есть — читает датчик один раз, затем для каждого подписчика формирует персональное AD-сообщение (с индивидуальным RSSI) и отправляет через `gatt_svc_notify_to()`
+4. Засыпает на `s_interval_ms`, повторяет
+5. Если подписчиков нет — спит 5 секунд (idle-режим для экономии CPU)
+
+Потокобезопасность `s_subs[]`: доступ из двух задач (NimBLE Host Task и Sensor Task) защищён `portMUX_TYPE` spinlock.
+
+### Интервал
+
+`s_interval_ms` — **глобальный**, один на всех подписчиков. Инициализируется из `CONFIG_SENSOR_DEFAULT_INTERVAL_MS` (по умолчанию 1000 мс). Команда `W/Time=N` перезаписывает значение для всех. Если два клиента установят разные интервалы — побеждает последний.
+
+Подписка автоматически удаляется при disconnect (`gap_event_handler` → `sensor_task_remove_subscriber()`).
+
+## GAP Event Handler
+
+Обработчик `gap_event_handler()` в `gap.c` обрабатывает:
+
+| Событие | Действие |
+|---------|----------|
+| `CONNECT` | Добавить клиента в `s_clients[]`, запросить параметры соединения (interval 30-50ms, latency 4), перезапустить advertising |
+| `DISCONNECT` | Удалить клиента, удалить подписку на sensor_task, перезапустить advertising |
+| `SUBSCRIBE` | Делегировать в `gatt_svr_subscribe_cb()` для обновления `notify_enabled` |
+| `CONN_UPDATE` | Логирование новых параметров соединения |
+| `ADV_COMPLETE` | Перезапуск advertising |
+| `NOTIFY_TX` | Логирование ошибок отправки notify |
+| `MTU` | Логирование согласованного MTU |
+
+## LED-индикация
+
+- **Мигание** (200 мс вкл / 800 мс выкл) — advertising, ожидание подключения
+- **Горит постоянно** — подключён хотя бы один клиент
+
+Абстракция в `led.c` поддерживает два backend-а через Kconfig: GPIO (прямое управление пином) и addressable LED strip (через RMT или SPI).
+
+## Конфигурация
+
+### Kconfig (`idf.py menuconfig`)
+
+- **Тип датчика**: Mock (генерация реалистичных данных с дрифтом) или DHT22 (AM2302 через RMT)
+- **LED**: тип (GPIO / LED strip), номер GPIO-пина
+- **Subas Device Name**: короткое имя для ADV (макс. 8 символов)
+- **Интервал опроса**: по умолчанию 1000 мс, диапазон 100–60000 мс
+- **Power Management**: light sleep, частоты CPU
+
+### sdkconfig.defaults
+
+BLE включён, NimBLE в качестве стека, MTU 247, GPIO LED pin 8.
+
+## Лицензия
+
+Unlicense OR CC0-1.0
