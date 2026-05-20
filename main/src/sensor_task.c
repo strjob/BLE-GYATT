@@ -13,6 +13,7 @@
  *   - s_subs[]: защищён portMUX spinlock (доступ из NimBLE task и Sensor Task)
  */
 #include "sensor_task.h"
+#include "battery.h"
 #include "common.h"
 #include "gap.h"
 #include "sensor.h"
@@ -89,15 +90,15 @@ static void sensor_task_fn(void *param) {
             ch = s_subs[i].conn_handle;
             portEXIT_CRITICAL(&s_subs_mux);
 
-            /* RSSI для конкретного клиента */
             int8_t rssi = 0;
             ble_gap_conn_rssi(ch, &rssi);
 
             int written = snprintf(
                 (char *)msg_buf, sizeof(msg_buf),
-                "#%s/%s/AD/%.1f/%.1f/%d$",
+                "#%s/%s/AD/%.1f/%.1f/%d/%d$",
                 from, gap_get_own_mac(),
-                reading.temperature, reading.humidity, (int)rssi);
+                reading.temperature, reading.humidity,
+                (int)rssi, (int)battery_get_level());
 
             if (written > 0 && written < (int)sizeof(msg_buf)) {
                 ESP_LOGI(TAG, "AD[%d]: %.*s", i, written, (char *)msg_buf);

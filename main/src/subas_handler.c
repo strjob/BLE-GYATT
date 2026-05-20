@@ -16,6 +16,7 @@
  *   *         -> A с echo DATA (acknowledge)
  */
 #include "subas_handler.h"
+#include "battery.h"
 #include "common.h"
 #include "gap.h"
 #include "sensor.h"
@@ -153,9 +154,10 @@ uint16_t subas_handle_message(const uint8_t *input, uint16_t input_len,
     /* Ответ на GET_INFO — информация об устройстве */
     else if (strcmp(op, "GET_INFO") == 0) {
         written = snprintf((char *)output, output_max_len,
-                           "#%s/%s/INFO/%s/%s/100/%ld/%s$",
+                           "#%s/%s/INFO/%s/%s/%d/%ld/%s$",
                            from, gap_get_own_mac(),
                            FW_VERSION, sensor_get_type(),
+                           (int)battery_get_level(),
                            (long)sensor_task_get_interval(),
                            sensor_task_is_subscribed() ? "1" : "0");
     }
@@ -163,14 +165,13 @@ uint16_t subas_handle_message(const uint8_t *input, uint16_t input_len,
     else if (strcmp(op, "R") == 0) {
         sensor_reading_t reading;
         if (sensor_read(&reading) == ESP_OK) {
-            /* Измеряем RSSI клиента, отправившего команду */
             int8_t rssi = 0;
             ble_gap_conn_rssi(conn_handle, &rssi);
             written = snprintf((char *)output, output_max_len,
-                               "#%s/%s/AD/%.1f/%.1f/%d$",
+                               "#%s/%s/AD/%.1f/%.1f/%d/%d$",
                                from, gap_get_own_mac(),
                                reading.temperature, reading.humidity,
-                               (int)rssi);
+                               (int)rssi, (int)battery_get_level());
         } else {
             written = snprintf((char *)output, output_max_len,
                                "#%s/%s/ER/sensor_error$",
