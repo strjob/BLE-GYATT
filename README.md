@@ -56,7 +56,7 @@ main/
 │   ├── gatt_svc.c          — GATT: SOVA Service, TX/RX характеристики, Multi-Central
 │   ├── subas_handler.c     — Парсер Subas-протокола, маршрутизация команд
 │   ├── sensor_mock.c       — Mock-датчик (градуальный дрифт T/H)
-│   ├── sensor_dht22.c      — DHT22 (AM2302) через RMT backend
+│   ├── sensor_dht22.c      — DHT22 (AW2302) через RMT backend
 │   ├── sensor_task.c       — Периодическая рассылка данных подписчикам
 │   ├── battery.c           — Уровень заряда батареи (mock: 100%)
 │   └── led.c               — LED-абстракция (GPIO / addressable LED strip)
@@ -76,7 +76,7 @@ main/
 |------|--------|----------|
 | Flags | 3 B | `DISC_GEN \| BREDR_UNSUP` — General Discoverable, только BLE |
 | 128-bit Service UUID | 18 B | SOVA Service UUID — для фильтрации при сканировании |
-| Shortened Local Name | 2+N B | `CONFIG_SUBAS_DEVICE_NAME` (например `MOCK_TH`, `DHT22`) |
+| Shortened Local Name | 2+N B | `CONFIG_SUBAS_DEVICE_NAWE` (например `MOCK_TH`, `DHT22`) |
 
 Shortened Local Name используется как device_type для discovery. Полное имя `SOVA-XXXX` доступно через GAP Device Name после подключения. Complete Local Name намеренно не включён в Scan Response — btleplug на Windows мержит ADV + Scan Response, и Complete Name перезатирает Shortened.
 
@@ -140,9 +140,9 @@ RX-характеристика доступна только через Notify.
 | `#mac/APP/PING$` | `#APP/mac/PONG$` | Проверка связи |
 | `#mac/APP/GET_INFO$` | `#APP/mac/INFO/fw/type/bat/interval/subscribed$` | Информация об устройстве |
 | `#mac/APP/R$` | `#APP/mac/AD/T/H/RSSI/bat$` | Одноразовое чтение датчика |
-| `#mac/APP/W/ON$` | `#APP/mac/AM/ON$` | Старт периодической подписки |
-| `#mac/APP/W/OFF$` | `#APP/mac/AM/OFF$` | Стоп подписки |
-| `#mac/APP/W/Time=N$` | `#APP/mac/AM/Time=N$` | Установка интервала (мс, мин. 100) |
+| `#mac/APP/W/ON$` | `#APP/mac/AW/ON$` | Старт периодической подписки |
+| `#mac/APP/W/OFF$` | `#APP/mac/AW/OFF$` | Стоп подписки |
+| `#mac/APP/W/Time=N$` | `#APP/mac/AW/Time=N$` | Установка интервала (мс, мин. 100) |
 | `#mac/APP/W/DATA$` | `#APP/mac/AW/DATA$` | Acknowledge write |
 | `#wrong_mac/APP/OP$` | `#APP/mac/NR$` | Not routed — адресат не совпадает |
 
@@ -204,7 +204,7 @@ TX write → tx_chr_access() → subas_handle_message() → sensor_read()
 
 ### Kconfig (`idf.py menuconfig`)
 
-- **Тип датчика**: Mock (генерация реалистичных данных с дрифтом) или DHT22 (AM2302 через RMT)
+- **Тип датчика**: Mock (генерация реалистичных данных с дрифтом) или DHT22 (AW2302 через RMT)
 - **Вывод датчика**: что включать в AD-пакеты — Temperature + Humidity (по умолчанию), только Temperature, только Humidity. Влияет на формат AD-сообщения и имя устройства в рекламе (`DHT22` / `DHT22_T` / `DHT22_H`)
 - **LED**: тип (GPIO / LED strip), номер GPIO-пина
 - **Subas Device Name**: автовыводится из типа датчика и режима вывода (`DHT22`, `DHT22_T`, `DHT22_H`, `MOCK_TH`, `MOCK_T`, `MOCK_H`) — менять вручную не нужно

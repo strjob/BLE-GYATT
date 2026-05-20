@@ -9,9 +9,9 @@
  *   PING      -> ответ PONG
  *   GET_INFO  -> ответ INFO с JSON (fw, type, bat, interval, subscribed)
  *   R         -> AR с данными датчика (acknowledge read)
- *   W/ON      -> AM/ON (старт подписки)
- *   W/OFF     -> AM/OFF (стоп подписки)
- *   W/Time=N  -> AM/Time=N (интервал) или EW (ошибка)
+ *   W/ON      -> AW/ON (старт подписки)
+ *   W/OFF     -> AW/OFF (стоп подписки)
+ *   W/Time=N  -> AW/Time=N (интервал) или EW (ошибка)
  *   W/other   -> AW (acknowledge write)
  *   *         -> A с echo DATA (acknowledge)
  */
@@ -198,18 +198,18 @@ uint16_t subas_handle_message(const uint8_t *input, uint16_t input_len,
             /* Подписать этого клиента на периодические AD нотификации */
             sensor_task_add_subscriber(from, conn_handle);
             written = snprintf((char *)output, output_max_len,
-                               "#%s/%s/AM/ON$", from, gap_get_own_mac());
+                               "#%s/%s/AW/ON$", from, gap_get_own_mac());
         } else if (strcmp(data, "OFF") == 0) {
             sensor_task_remove_subscriber(conn_handle);
             written = snprintf((char *)output, output_max_len,
-                               "#%s/%s/AM/OFF$", from, gap_get_own_mac());
+                               "#%s/%s/AW/OFF$", from, gap_get_own_mac());
         } else if (strncmp(data, "Time=", 5) == 0) {
             /* Разбор интервала: Time=N */
             long val = strtol(data + 5, NULL, 10);
             if (val >= 100) {
                 uint32_t actual = sensor_task_set_interval((uint32_t)val);
                 written = snprintf((char *)output, output_max_len,
-                                   "#%s/%s/AM/Time=%ld$",
+                                   "#%s/%s/AW/Time=%ld$",
                                    from, gap_get_own_mac(), (long)actual);
             } else {
                 written = snprintf((char *)output, output_max_len,
