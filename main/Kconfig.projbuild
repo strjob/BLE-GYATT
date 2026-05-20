@@ -97,17 +97,13 @@ menu "Sensor Configuration"
     endchoice
 
     config SUBAS_DEVICE_NAME
-        string "Subas device name (protocol address)"
+        string
         default "MOCK_T"  if SENSOR_TYPE_MOCK  && SENSOR_OUTPUT_TEMP_ONLY
         default "MOCK_H"  if SENSOR_TYPE_MOCK  && SENSOR_OUTPUT_HUM_ONLY
         default "DHT22_T" if SENSOR_TYPE_DHT22 && SENSOR_OUTPUT_TEMP_ONLY
         default "DHT22_H" if SENSOR_TYPE_DHT22 && SENSOR_OUTPUT_HUM_ONLY
         default "MOCK_TH" if SENSOR_TYPE_MOCK
         default "DHT22"   if SENSOR_TYPE_DHT22
-        help
-            Device name used as TO/FROM address in Subas protocol.
-            The app routes commands by this name.
-            Examples: MOCK_TH, DHT22, DHT22_T, DHT22_H.
 
     config SENSOR_DEFAULT_INTERVAL_MS
         int "Default polling interval (ms)"
