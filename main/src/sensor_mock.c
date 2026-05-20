@@ -77,5 +77,11 @@ esp_err_t sensor_read(sensor_reading_t *reading) {
 }
 
 const char *sensor_get_type(void) {
+#if defined(CONFIG_SENSOR_OUTPUT_TEMP_ONLY)
+    return "mock_t";
+#elif defined(CONFIG_SENSOR_OUTPUT_HUM_ONLY)
+    return "mock_h";
+#else
     return "mock_th";
+#endif
 }

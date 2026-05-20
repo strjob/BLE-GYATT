@@ -58,6 +58,7 @@ main/
 │   ├── sensor_mock.c       — Mock-датчик (градуальный дрифт T/H)
 │   ├── sensor_dht22.c      — DHT22 (AM2302) через RMT backend
 │   ├── sensor_task.c       — Периодическая рассылка данных подписчикам
+│   ├── battery.c           — Уровень заряда батареи (mock: 100%)
 │   └── led.c               — LED-абстракция (GPIO / addressable LED strip)
 ```
 
@@ -138,7 +139,7 @@ RX-характеристика доступна только через Notify.
 |--------------------|-------|----------|
 | `#mac/APP/PING$` | `#APP/mac/PONG$` | Проверка связи |
 | `#mac/APP/GET_INFO$` | `#APP/mac/INFO/fw/type/bat/interval/subscribed$` | Информация об устройстве |
-| `#mac/APP/R$` | `#APP/mac/AD/T/H/RSSI$` | Одноразовое чтение датчика |
+| `#mac/APP/R$` | `#APP/mac/AD/T/H/RSSI/bat$` | Одноразовое чтение датчика |
 | `#mac/APP/W/ON$` | `#APP/mac/AM/ON$` | Старт периодической подписки |
 | `#mac/APP/W/OFF$` | `#APP/mac/AM/OFF$` | Стоп подписки |
 | `#mac/APP/W/Time=N$` | `#APP/mac/AM/Time=N$` | Установка интервала (мс, мин. 100) |
@@ -166,7 +167,7 @@ TX write → tx_chr_access() → subas_handle_message() → sensor_read()
 
 1. Команда `W/ON` из NimBLE Host Task вызывает `sensor_task_add_subscriber()`, которая записывает `{from, conn_handle}` в таблицу подписок `s_subs[]`
 2. `sensor_task_fn()` в бесконечном цикле проверяет наличие подписчиков
-3. Если есть — читает датчик один раз, затем для каждого подписчика формирует персональное AD-сообщение (с индивидуальным RSSI) и отправляет через `gatt_svc_notify_to()`
+3. Если есть — читает датчик один раз, затем для каждого подписчика формирует персональное AD-сообщение (с индивидуальным RSSI и зарядом батареи) и отправляет через `gatt_svc_notify_to()`
 4. Засыпает на `s_interval_ms`, повторяет
 5. Если подписчиков нет — спит 5 секунд (idle-режим для экономии CPU)
 
@@ -204,10 +205,23 @@ TX write → tx_chr_access() → subas_handle_message() → sensor_read()
 ### Kconfig (`idf.py menuconfig`)
 
 - **Тип датчика**: Mock (генерация реалистичных данных с дрифтом) или DHT22 (AM2302 через RMT)
+- **Вывод датчика**: что включать в AD-пакеты — Temperature + Humidity (по умолчанию), только Temperature, только Humidity. Влияет на формат AD-сообщения и имя устройства в рекламе (`DHT22` / `DHT22_T` / `DHT22_H`)
 - **LED**: тип (GPIO / LED strip), номер GPIO-пина
-- **Subas Device Name**: короткое имя для ADV (макс. 8 символов)
+- **Subas Device Name**: короткое имя для ADV (макс. 8 символов); устанавливается автоматически в зависимости от типа датчика и режима вывода
 - **Интервал опроса**: по умолчанию 1000 мс, диапазон 100–60000 мс
 - **Power Management**: light sleep, частоты CPU
+
+### Формат AD-сообщения
+
+AD-пакет (ответ на `R` и периодические нотификации) зависит от настройки **Вывод датчика**:
+
+| Режим | Формат |
+|-------|--------|
+| T + H | `#APP/mac/AD/temp/hum/rssi/bat$` |
+| Только T | `#APP/mac/AD/temp/rssi/bat$` |
+| Только H | `#APP/mac/AD/hum/rssi/bat$` |
+
+`rssi` — RSSI конкретного клиента в дБм, `bat` — заряд батареи в % (0–100).
 
 ### sdkconfig.defaults
 

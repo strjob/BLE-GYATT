@@ -167,11 +167,25 @@ uint16_t subas_handle_message(const uint8_t *input, uint16_t input_len,
         if (sensor_read(&reading) == ESP_OK) {
             int8_t rssi = 0;
             ble_gap_conn_rssi(conn_handle, &rssi);
+#if defined(CONFIG_SENSOR_OUTPUT_TEMP_ONLY)
+            written = snprintf((char *)output, output_max_len,
+                               "#%s/%s/AD/%.1f/%d/%d$",
+                               from, gap_get_own_mac(),
+                               reading.temperature,
+                               (int)rssi, (int)battery_get_level());
+#elif defined(CONFIG_SENSOR_OUTPUT_HUM_ONLY)
+            written = snprintf((char *)output, output_max_len,
+                               "#%s/%s/AD/%.1f/%d/%d$",
+                               from, gap_get_own_mac(),
+                               reading.humidity,
+                               (int)rssi, (int)battery_get_level());
+#else
             written = snprintf((char *)output, output_max_len,
                                "#%s/%s/AD/%.1f/%.1f/%d/%d$",
                                from, gap_get_own_mac(),
                                reading.temperature, reading.humidity,
                                (int)rssi, (int)battery_get_level());
+#endif
         } else {
             written = snprintf((char *)output, output_max_len,
                                "#%s/%s/ER/sensor_error$",

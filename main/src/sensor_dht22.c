@@ -46,5 +46,11 @@ esp_err_t sensor_read(sensor_reading_t *reading) {
 }
 
 const char *sensor_get_type(void) {
+#if defined(CONFIG_SENSOR_OUTPUT_TEMP_ONLY)
+    return "DHT22_T";
+#elif defined(CONFIG_SENSOR_OUTPUT_HUM_ONLY)
+    return "DHT22_H";
+#else
     return "DHT22";
+#endif
 }

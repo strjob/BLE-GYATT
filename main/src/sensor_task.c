@@ -93,12 +93,28 @@ static void sensor_task_fn(void *param) {
             int8_t rssi = 0;
             ble_gap_conn_rssi(ch, &rssi);
 
+#if defined(CONFIG_SENSOR_OUTPUT_TEMP_ONLY)
+            int written = snprintf(
+                (char *)msg_buf, sizeof(msg_buf),
+                "#%s/%s/AD/%.1f/%d/%d$",
+                from, gap_get_own_mac(),
+                reading.temperature,
+                (int)rssi, (int)battery_get_level());
+#elif defined(CONFIG_SENSOR_OUTPUT_HUM_ONLY)
+            int written = snprintf(
+                (char *)msg_buf, sizeof(msg_buf),
+                "#%s/%s/AD/%.1f/%d/%d$",
+                from, gap_get_own_mac(),
+                reading.humidity,
+                (int)rssi, (int)battery_get_level());
+#else
             int written = snprintf(
                 (char *)msg_buf, sizeof(msg_buf),
                 "#%s/%s/AD/%.1f/%.1f/%d/%d$",
                 from, gap_get_own_mac(),
                 reading.temperature, reading.humidity,
                 (int)rssi, (int)battery_get_level());
+#endif
 
             if (written > 0 && written < (int)sizeof(msg_buf)) {
                 ESP_LOGI(TAG, "AD[%d]: %.*s", i, written, (char *)msg_buf);
